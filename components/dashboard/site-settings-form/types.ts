@@ -21,4 +21,9 @@ export type Site = {
   smtpUser: string | null
   smtpPass: string | null
   smtpFrom: string | null
+  mediaEnabled: boolean
+  mediaProvider: "CATBOX" | "IMGBB" | "IMGUR"
+  mediaApiKey: string | null
+  mediaMaxImages: number
+  mediaMaxBytes: number
 }

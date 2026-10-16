@@ -4,6 +4,7 @@ import type {
   Commenter,
   WidgetConfig,
   WidgetThemeConfig,
+  PendingUpload,
 } from "./types"
 import {
   fetchComments,
@@ -13,6 +14,7 @@ import {
   deleteComment,
   updateNotificationPreference,
   searchCommenters,
+  uploadImage,
   UnauthorizedError,
 } from "./api"
 import { loadStoredAuth, signInWithGoogle, clearAuth } from "./auth"
@@ -26,6 +28,7 @@ import {
   renderLoading,
   renderLoadingAuthBar,
   renderBannedBanner,
+  renderLightbox,
   type CommentHandlers,
   type CommentState,
 } from "./render"
@@ -139,6 +142,12 @@ class ZeonWidget {
   private activeConfig: WidgetThemeConfig | null = null
   private lastEffectiveTheme: "LIGHT" | "DARK" | null = null
   private htmlObserver: MutationObserver | null = null
+  private pendingUploads = new Map<string, PendingUpload[]>()
+  private lightbox: {
+    el: HTMLElement
+    open: (url: string) => void
+    close: () => void
+  } | null = null
 
   constructor(config: WidgetConfig) {
     this.config = config
@@ -162,6 +171,9 @@ class ZeonWidget {
     )
     this.shadow.appendChild(this.themeStyle)
     this.setupThemeObservers()
+
+    this.lightbox = renderLightbox()
+    this.shadow.appendChild(this.lightbox.el)
 
     this.root = document.createElement("div")
     this.root.className = "z-root"
@@ -335,10 +347,29 @@ class ZeonWidget {
     }
   }
 
-  private async handleSubmit(body: string, parentId?: string) {
+  private showActionError(message: string): void {
+    if (this.actionErrorTimer) clearTimeout(this.actionErrorTimer)
+    this.actionError = message
+    this.actionErrorTimer = setTimeout(() => {
+      this.actionError = null
+      this.render()
+    }, 4000)
+    this.render()
+  }
+
+  private async handleSubmit(
+    body: string,
+    parentId?: string,
+    imageUrls?: string[]
+  ) {
     if (this.auth.status !== "authenticated") return
     this.isSubmitting = true
     this.render()
+    const formKey = parentId
+      ? this.replyingToId
+        ? `reply-${this.replyingToId}`
+        : "main"
+      : "main"
     try {
       let finalBody = body
       let finalParentId = parentId
@@ -362,6 +393,7 @@ class ZeonWidget {
         url: window.location.href.split("#")[0],
         parentId: finalParentId,
         replyToId,
+        imageUrls: imageUrls && imageUrls.length > 0 ? imageUrls : undefined,
       })
 
       if (finalParentId) {
@@ -373,6 +405,7 @@ class ZeonWidget {
         this.comments = [comment, ...this.comments]
       }
       this.buildCommentMap()
+      this.clearPendingUploads(formKey)
       this.replyTo = null
       this.replyingToId = null
       this.actionError = null
@@ -382,6 +415,94 @@ class ZeonWidget {
       this.isSubmitting = false
       this.render()
     }
+  }
+
+  private async handleFileSelect(files: FileList | null, formKey: string) {
+    if (!files || files.length === 0) return
+    if (this.auth.status !== "authenticated") return
+
+    const current = this.pendingUploads.get(formKey) || []
+    const remainingSlots = 4 - current.length
+    if (remainingSlots <= 0) return
+
+    const allowedFiles = Array.from(files).slice(0, remainingSlots)
+    const maxBytes = this.activeConfig?.mediaMaxBytes || 5 * 1024 * 1024
+
+    const newPending: PendingUpload[] = []
+
+    for (const file of allowedFiles) {
+      if (file.size > maxBytes) {
+        this.showActionError(`"${file.name}" exceeds the 5MB size limit`)
+        continue
+      }
+      if (
+        !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(
+          file.type
+        )
+      ) {
+        this.showActionError(`"${file.name}" has an unsupported image format`)
+        continue
+      }
+
+      const id = `up_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      const previewUrl = URL.createObjectURL(file)
+      newPending.push({
+        id,
+        file,
+        previewUrl,
+        status: "uploading",
+      })
+    }
+
+    if (newPending.length === 0) return
+
+    this.pendingUploads.set(formKey, [...current, ...newPending])
+    this.render()
+
+    for (const pending of newPending) {
+      try {
+        const res = await uploadImage(
+          this.config.appUrl,
+          this.auth.token,
+          this.config.siteKey,
+          pending.file
+        )
+        pending.status = "done"
+        pending.url = res.url
+      } catch (err: unknown) {
+        pending.status = "error"
+        const msg = err instanceof Error ? err.message : "Upload failed"
+        this.showActionError(msg)
+      }
+      this.render()
+    }
+  }
+
+  private handleRemoveUpload(id: string, formKey: string) {
+    const current = this.pendingUploads.get(formKey) || []
+    const item = current.find((u) => u.id === id)
+    if (item?.previewUrl) {
+      URL.revokeObjectURL(item.previewUrl)
+    }
+    const filtered = current.filter((u) => u.id !== id)
+    if (filtered.length > 0) {
+      this.pendingUploads.set(formKey, filtered)
+    } else {
+      this.pendingUploads.delete(formKey)
+    }
+    this.render()
+  }
+
+  private clearPendingUploads(formKey: string) {
+    const current = this.pendingUploads.get(formKey) || []
+    for (const u of current) {
+      if (u.previewUrl) URL.revokeObjectURL(u.previewUrl)
+    }
+    this.pendingUploads.delete(formKey)
+  }
+
+  private handleOpenImage(url: string) {
+    this.lightbox?.open(url)
   }
 
   private async handleLike(comment: CommentData) {
@@ -617,8 +738,10 @@ class ZeonWidget {
       onDelete: (comment) => this.handleDeleteClick(comment),
       onCancelDelete: () => this.handleCancelDelete(),
       onConfirmDelete: (id) => this.handleConfirmDelete(id),
-      onSubmitReply: (body, parentId) => this.handleSubmit(body, parentId),
+      onSubmitReply: (body, parentId, imageUrls) =>
+        this.handleSubmit(body, parentId, imageUrls),
       onCancelReply: () => this.handleCancelReply(),
+      onOpenImage: (url) => this.handleOpenImage(url),
     }
   }
 
@@ -630,6 +753,10 @@ class ZeonWidget {
       isSubmitting: this.isSubmitting,
       currentUser: this.currentUser,
       likingIds: this.likingIds,
+      mediaEnabled: this.activeConfig?.mediaEnabled ?? false,
+      pendingUploads: this.pendingUploads,
+      onFileSelect: (files, formKey) => this.handleFileSelect(files, formKey),
+      onRemoveUpload: (id, formKey) => this.handleRemoveUpload(id, formKey),
     }
   }
 
@@ -676,15 +803,30 @@ class ZeonWidget {
     )
 
     if (this.auth.status === "authenticated" && !this.isBanned) {
+      const formKey = "main"
+      const uploads = this.pendingUploads.get(formKey) || []
+      const mediaOptions = this.activeConfig?.mediaEnabled
+        ? {
+            enabled: true,
+            uploads,
+            onFileSelect: (files: FileList | null) =>
+              this.handleFileSelect(files, formKey),
+            onRemoveUpload: (id: string) =>
+              this.handleRemoveUpload(id, formKey),
+          }
+        : undefined
+
       this.root.appendChild(
         renderCommentForm(
-          (body, parentId) => this.handleSubmit(body, parentId),
+          (body, parentId, imageUrls) =>
+            this.handleSubmit(body, parentId, imageUrls),
           this.replyTo,
           () => {
             this.replyTo = null
             this.render()
           },
-          this.isSubmitting
+          this.isSubmitting,
+          mediaOptions
         )
       )
     }

@@ -4,6 +4,7 @@ import { Separator } from "@/components/ui/separator"
 import { GeneralSection } from "./general-section"
 import { InstallSnippetSection } from "./install-snippet-section"
 import { AppearanceSection } from "./appearance-section"
+import { MediaUploadSection } from "./media-upload-section"
 import { TransferSection } from "./transfer-section"
 import { EmailNotificationsSection } from "./email-notifications-section"
 import { DangerZoneSection } from "./danger-zone-section"
@@ -27,6 +28,7 @@ export function SiteSettingsForm({ site: initialSite, role }: Props) {
       {can("general") && <GeneralSection site={site} />}
       {can("install") && <InstallSnippetSection siteKey={site.siteKey} />}
       {can("appearance") && <AppearanceSection site={site} />}
+      {can("media") && <MediaUploadSection site={site} />}
       {can("transfer") && <TransferSection siteId={site.id} />}
       {can("email") && <EmailNotificationsSection site={site} />}
       {can("danger") && (

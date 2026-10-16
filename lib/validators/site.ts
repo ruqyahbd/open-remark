@@ -59,6 +59,16 @@ export const UpdateSiteSchema = z.object({
   smtpUser: z.string().max(255).nullable().optional(),
   smtpPass: z.string().max(255).nullable().optional(),
   smtpFrom: z.string().email("Must be a valid email").nullable().optional(),
+  mediaEnabled: z.boolean().optional(),
+  mediaProvider: z.enum(["CATBOX", "IMGBB", "IMGUR"]).optional(),
+  mediaApiKey: z.string().max(255).nullable().optional(),
+  mediaMaxImages: z.number().int().min(1).max(10).optional(),
+  mediaMaxBytes: z
+    .number()
+    .int()
+    .min(1024)
+    .max(20 * 1024 * 1024)
+    .optional(),
 })
 
 export type CreateSiteInput = z.infer<typeof CreateSiteSchema>

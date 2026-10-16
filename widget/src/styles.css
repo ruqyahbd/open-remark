@@ -986,3 +986,182 @@
   outline: 2px solid var(--z-primary);
   outline-offset: 2px;
 }
+
+/* ─── Media Attachment & Gallery ─────────────────────────────────────────── */
+.z-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--z-radius, 6px);
+  border: 1px solid var(--z-border);
+  background: var(--z-bg);
+  color: var(--z-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.z-attach-btn:hover:not(:disabled) {
+  color: var(--z-text);
+  border-color: var(--z-primary);
+  background: var(--z-subtle);
+}
+.z-attach-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.z-form-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.z-upload-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+}
+.z-upload-item {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--z-border);
+  background: var(--z-subtle);
+}
+.z-upload-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.z-upload-item.is-uploading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+.z-upload-item .z-upload-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border: 2px solid #fff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: z-spin 0.7s linear infinite;
+  z-index: 2;
+}
+.z-upload-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  border: none;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  z-index: 3;
+  transition: background 0.15s;
+}
+.z-upload-remove:hover {
+  background: #ef4444;
+}
+
+/* Comment Thumbnail Gallery */
+.z-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.z-gallery-thumb {
+  background: none;
+  border: 1px solid var(--z-border);
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  display: block;
+  line-height: 0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.z-gallery-thumb:hover {
+  transform: scale(1.02);
+  border-color: var(--z-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.z-gallery-img {
+  width: 110px;
+  height: 85px;
+  object-fit: cover;
+  display: block;
+}
+.z-gallery-single .z-gallery-img {
+  width: 180px;
+  height: 130px;
+}
+
+/* Lightbox Modal */
+.z-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999999;
+  padding: 20px;
+  box-sizing: border-box;
+}
+.z-lightbox-img {
+  max-width: 90vw;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  animation: z-zoom 0.18s ease-out;
+}
+.z-lightbox-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.z-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+@keyframes z-zoom {
+  from { transform: scale(0.94); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes z-spin {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}

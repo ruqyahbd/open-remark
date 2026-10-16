@@ -185,6 +185,19 @@ export async function updateSite(
       ...(input.smtpUser !== undefined && { smtpUser: input.smtpUser }),
       ...(input.smtpPass !== undefined && { smtpPass: input.smtpPass }),
       ...(input.smtpFrom !== undefined && { smtpFrom: input.smtpFrom }),
+      ...(typeof input.mediaEnabled === "boolean" && {
+        mediaEnabled: input.mediaEnabled,
+      }),
+      ...(input.mediaProvider && { mediaProvider: input.mediaProvider }),
+      ...(input.mediaApiKey !== undefined && {
+        mediaApiKey: input.mediaApiKey,
+      }),
+      ...(typeof input.mediaMaxImages === "number" && {
+        mediaMaxImages: input.mediaMaxImages,
+      }),
+      ...(typeof input.mediaMaxBytes === "number" && {
+        mediaMaxBytes: input.mediaMaxBytes,
+      }),
     },
   })
 }

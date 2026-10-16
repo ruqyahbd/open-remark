@@ -3,6 +3,7 @@ import { z } from "zod"
 import { UpdateCommentSchema } from "@/lib/validators/comment"
 import {
   updateCommentBody,
+  updateCommentImages,
   deleteComment,
 } from "@/lib/services/comment-service"
 import { isCommenterBannedOnSite } from "@/lib/services/user-service"
@@ -65,6 +66,11 @@ export async function PATCH(
     )
     if (isBanned) {
       throw new ApiError("Your account has been suspended on this site", 403)
+    }
+
+    if (parsed.data.imageUrls !== undefined) {
+      const updated = await updateCommentImages(id, parsed.data.imageUrls)
+      return buildCorsResponse(req, updated)
     }
 
     if (parsed.data.body !== undefined) {

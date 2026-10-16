@@ -24,6 +24,7 @@ export type CommentData = {
   parentId: string | null
   commenter: Commenter
   banned?: boolean
+  imageUrls?: string[]
   replies: CommentData[]
 }
 
@@ -47,4 +48,17 @@ export type WidgetThemeConfig = {
   currentUser?: { isBanned: boolean; notificationsEnabled: boolean }
   enable: boolean
   poweredByHtml: string
+  mediaEnabled?: boolean
+  mediaMaxImages?: number
+  mediaMaxBytes?: number
+}
+
+export type PendingUpload = {
+  id: string
+  file: File
+  previewUrl: string
+  status: "uploading" | "done" | "ready" | "error"
+  url?: string
+  thumbUrl?: string
+  error?: string
 }

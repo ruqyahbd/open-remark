@@ -10,8 +10,9 @@ export interface CommentHandlers {
   onDelete: (comment: CommentData) => void
   onCancelDelete: () => void
   onConfirmDelete: (commentId: string) => void
-  onSubmitReply: (body: string, parentId: string) => void
+  onSubmitReply: (body: string, parentId: string, imageUrls?: string[]) => void
   onCancelReply: () => void
+  onOpenImage?: (url: string) => void
 }
 
 export interface CommentState {
@@ -21,6 +22,127 @@ export interface CommentState {
   isSubmitting: boolean
   currentUser: Commenter | null
   likingIds: Set<string>
+  mediaEnabled?: boolean
+  pendingUploads?: Map<string, import("./types").PendingUpload[]>
+  onFileSelect?: (files: FileList | null, formKey: string) => void
+  onRemoveUpload?: (id: string, formKey: string) => void
+}
+
+export const PHOTO_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`
+
+export function renderImageGallery(
+  urls: string[],
+  onOpenImage?: (url: string) => void
+): HTMLElement {
+  const gallery = document.createElement("div")
+  gallery.className = "z-gallery"
+  if (urls.length === 1) gallery.classList.add("z-gallery-single")
+
+  for (const url of urls) {
+    const thumbBtn = document.createElement("button")
+    thumbBtn.type = "button"
+    thumbBtn.className = "z-gallery-thumb"
+    thumbBtn.setAttribute("aria-label", "View full size image")
+
+    const img = document.createElement("img")
+    img.src = url
+    img.loading = "lazy"
+    img.alt = "Attached thumbnail"
+    img.className = "z-gallery-img"
+    thumbBtn.appendChild(img)
+
+    if (onOpenImage) {
+      thumbBtn.addEventListener("click", (e) => {
+        e.preventDefault()
+        onOpenImage(url)
+      })
+    }
+
+    gallery.appendChild(thumbBtn)
+  }
+
+  return gallery
+}
+
+export function renderUploadStrip(
+  uploads: import("./types").PendingUpload[],
+  onRemove: (id: string) => void
+): HTMLElement {
+  const strip = document.createElement("div")
+  strip.className = "z-upload-strip"
+
+  for (const u of uploads) {
+    const item = document.createElement("div")
+    item.className = "z-upload-item"
+    if (u.status === "uploading") item.classList.add("is-uploading")
+
+    const img = document.createElement("img")
+    img.src = u.previewUrl
+    img.alt = u.file.name
+    item.appendChild(img)
+
+    if (u.status === "uploading") {
+      const spinner = document.createElement("div")
+      spinner.className = "z-upload-spinner"
+      item.appendChild(spinner)
+    }
+
+    const removeBtn = document.createElement("button")
+    removeBtn.type = "button"
+    removeBtn.className = "z-upload-remove"
+    removeBtn.setAttribute("aria-label", "Remove image")
+    removeBtn.textContent = "✕"
+    removeBtn.addEventListener("click", (e) => {
+      e.preventDefault()
+      onRemove(u.id)
+    })
+    item.appendChild(removeBtn)
+
+    strip.appendChild(item)
+  }
+
+  return strip
+}
+
+export function renderLightbox(): {
+  el: HTMLElement
+  open: (url: string) => void
+  close: () => void
+} {
+  const box = document.createElement("div")
+  box.className = "z-lightbox"
+  box.setAttribute("role", "dialog")
+  box.setAttribute("aria-label", "Image preview")
+
+  const img = document.createElement("img")
+  img.className = "z-lightbox-img"
+  img.alt = "Enlarged view"
+
+  const closeBtn = document.createElement("button")
+  closeBtn.type = "button"
+  closeBtn.className = "z-lightbox-close"
+  closeBtn.setAttribute("aria-label", "Close image preview")
+  closeBtn.textContent = "✕"
+
+  const close = () => {
+    box.style.display = "none"
+    img.src = ""
+  }
+
+  const open = (url: string) => {
+    img.src = url
+    box.style.display = "flex"
+  }
+
+  closeBtn.addEventListener("click", close)
+  box.addEventListener("click", (e) => {
+    if (e.target === box) close()
+  })
+
+  box.appendChild(closeBtn)
+  box.appendChild(img)
+
+  return { el: box, open, close }
 }
 
 interface InlineFormConfig {
@@ -33,8 +155,14 @@ interface InlineFormConfig {
   submitLabel: string
   submittingLabel: string
   isSubmitting: boolean
-  onSubmit: (body: string) => void | Promise<void>
+  onSubmit: (body: string, imageUrls?: string[]) => void | Promise<void>
   onCancel: () => void
+  mediaOptions?: {
+    enabled: boolean
+    uploads: import("./types").PendingUpload[]
+    onFileSelect: (files: FileList | null) => void
+    onRemoveUpload: (id: string) => void
+  }
 }
 
 function renderInlineForm(cfg: InlineFormConfig): HTMLElement {
@@ -62,14 +190,47 @@ function renderInlineForm(cfg: InlineFormConfig): HTMLElement {
   textarea.disabled = cfg.isSubmitting
   wrap.appendChild(textarea)
 
+  if (cfg.mediaOptions?.uploads && cfg.mediaOptions.uploads.length > 0) {
+    wrap.appendChild(
+      renderUploadStrip(
+        cfg.mediaOptions.uploads,
+        cfg.mediaOptions.onRemoveUpload
+      )
+    )
+  }
+
   const footer = document.createElement("div")
   footer.className = "z-inline-form-footer"
 
-  const counter = document.createElement("span")
-  counter.className = "z-char-counter"
-  counter.setAttribute("aria-live", "polite")
-  counter.textContent = `${cfg.initialValue.length} / ${cfg.maxChars}`
-  footer.appendChild(counter)
+  const footerLeft = document.createElement("div")
+  footerLeft.className = "z-form-actions-left"
+
+  if (cfg.mediaOptions?.enabled) {
+    const attachBtn = document.createElement("button")
+    attachBtn.type = "button"
+    attachBtn.className = "z-attach-btn"
+    attachBtn.setAttribute("aria-label", "Attach images")
+    attachBtn.title = "Attach images (max 4)"
+    attachBtn.innerHTML = PHOTO_ICON
+    attachBtn.disabled =
+      cfg.isSubmitting || cfg.mediaOptions.uploads.length >= 4
+
+    const fileInput = document.createElement("input")
+    fileInput.type = "file"
+    fileInput.accept = "image/jpeg,image/png,image/webp,image/gif"
+    fileInput.multiple = true
+    fileInput.style.display = "none"
+    fileInput.addEventListener("change", () => {
+      cfg.mediaOptions?.onFileSelect(fileInput.files)
+      fileInput.value = ""
+    })
+    attachBtn.addEventListener("click", () => fileInput.click())
+
+    footerLeft.appendChild(attachBtn)
+    footerLeft.appendChild(fileInput)
+  }
+
+  footer.appendChild(footerLeft)
 
   const btnWrap = document.createElement("div")
   btnWrap.className = "z-inline-form-btns"
@@ -81,20 +242,42 @@ function renderInlineForm(cfg: InlineFormConfig): HTMLElement {
   cancelBtn.addEventListener("click", cfg.onCancel)
   btnWrap.appendChild(cancelBtn)
 
+  const isUploading =
+    cfg.mediaOptions?.uploads.some((u) => u.status === "uploading") ?? false
+  const successfulUploads =
+    cfg.mediaOptions?.uploads.filter((u) => u.status === "done" && u.url) ?? []
+
+  const updateSubmitState = () => {
+    const len = textarea.value.length
+    const hasText = textarea.value.trim().length > 0
+    const hasImages = successfulUploads.length > 0
+    const uploading =
+      cfg.mediaOptions?.uploads.some((u) => u.status === "uploading") ?? false
+    submitBtn.disabled =
+      cfg.isSubmitting ||
+      uploading ||
+      (!hasText && !hasImages) ||
+      len > cfg.maxChars
+  }
+
   const submitBtn = document.createElement("button")
   submitBtn.className = "z-btn z-btn-primary z-btn-sm"
   submitBtn.type = "button"
   submitBtn.textContent = cfg.isSubmitting
     ? cfg.submittingLabel
-    : cfg.submitLabel
-  submitBtn.disabled = cfg.isSubmitting || cfg.initialValue.length === 0
+    : isUploading
+      ? "Uploading…"
+      : cfg.submitLabel
+  updateSubmitState()
+
   submitBtn.addEventListener("click", async () => {
     const body = textarea.value.trim()
-    if (!body || body.length > cfg.maxChars) {
+    const urls = successfulUploads.map((u) => u.url!)
+    if ((!body && urls.length === 0) || body.length > cfg.maxChars) {
       textarea.focus()
       return
     }
-    await cfg.onSubmit(body)
+    await cfg.onSubmit(body, urls)
   })
   btnWrap.appendChild(submitBtn)
   footer.appendChild(btnWrap)
@@ -103,14 +286,7 @@ function renderInlineForm(cfg: InlineFormConfig): HTMLElement {
   textarea.addEventListener("input", () => {
     textarea.style.height = "auto"
     textarea.style.height = `${textarea.scrollHeight}px`
-    const len = textarea.value.length
-    counter.textContent = `${len} / ${cfg.maxChars}`
-    counter.classList.toggle(
-      "z-char-counter-warn",
-      len >= cfg.maxChars * 0.9 && len < cfg.maxChars
-    )
-    counter.classList.toggle("z-char-counter-over", len > cfg.maxChars)
-    submitBtn.disabled = cfg.isSubmitting || len === 0 || len > cfg.maxChars
+    updateSubmitState()
   })
 
   setTimeout(() => textarea.focus(), 0)
@@ -349,6 +525,12 @@ export function renderCommentItem(
     const body = renderCommentBody(comment.body)
     right.appendChild(body)
 
+    if (comment.imageUrls && comment.imageUrls.length > 0) {
+      right.appendChild(
+        renderImageGallery(comment.imageUrls, handlers.onOpenImage)
+      )
+    }
+
     const actions = document.createElement("div")
     actions.className = "z-comment-actions"
 
@@ -447,13 +629,26 @@ export function renderCommentItem(
   if (isReplying && currentUser) {
     const formWrap = document.createElement("div")
     formWrap.className = "z-inline-reply"
+    const formKey = `reply-${comment.id}`
+    const uploads = state.pendingUploads?.get(formKey) || []
+    const mediaOptions = state.mediaEnabled
+      ? {
+          enabled: true,
+          uploads,
+          onFileSelect: (files: FileList | null) =>
+            state.onFileSelect?.(files, formKey),
+          onRemoveUpload: (id: string) => state.onRemoveUpload?.(id, formKey),
+        }
+      : undefined
+
     formWrap.appendChild(
       renderInlineReplyForm(
         comment,
         currentUser,
         onSubmitReply,
         onCancelReply,
-        isSubmitting
+        isSubmitting,
+        mediaOptions
       )
     )
     li.appendChild(formWrap)
@@ -511,9 +706,10 @@ export function renderCommentItem(
 function renderInlineReplyForm(
   replyTo: CommentData,
   currentUser: Commenter,
-  onSubmit: (body: string, parentId: string) => void,
+  onSubmit: (body: string, parentId: string, imageUrls?: string[]) => void,
   onCancel: () => void,
-  isSubmitting: boolean
+  isSubmitting: boolean,
+  mediaOptions?: InlineFormConfig["mediaOptions"]
 ): HTMLElement {
   return renderInlineForm({
     headerLabel: `Reply to ${replyTo.commenter.name}`,
@@ -525,8 +721,9 @@ function renderInlineReplyForm(
     submitLabel: "Reply",
     submittingLabel: "Posting…",
     isSubmitting,
-    onSubmit: (body) => onSubmit(body, replyTo.id),
+    onSubmit: (body, imageUrls) => onSubmit(body, replyTo.id, imageUrls),
     onCancel,
+    mediaOptions,
   })
 }
 
@@ -657,10 +854,20 @@ export function renderAuthBar(
 }
 
 export function renderCommentForm(
-  onSubmit: (body: string, parentId?: string) => Promise<void>,
+  onSubmit: (
+    body: string,
+    parentId?: string,
+    imageUrls?: string[]
+  ) => Promise<void>,
   replyTo: CommentData | null,
   onCancelReply: () => void,
-  isSubmitting: boolean
+  isSubmitting: boolean,
+  mediaOptions?: {
+    enabled: boolean
+    uploads: import("./types").PendingUpload[]
+    onFileSelect: (files: FileList | null) => void
+    onRemoveUpload: (id: string) => void
+  }
 ): HTMLElement {
   const form = document.createElement("div")
   form.className = "z-form"
@@ -689,51 +896,92 @@ export function renderCommentForm(
   )
   textarea.rows = 3
   textarea.disabled = isSubmitting
-
-  textarea.addEventListener("input", () => {
-    textarea.style.height = "auto"
-    textarea.style.height = `${textarea.scrollHeight}px`
-    const len = textarea.value.length
-    counter.textContent = `${len} / ${MAX_CHARS_COMMENT}`
-    counter.classList.toggle(
-      "z-char-counter-warn",
-      len >= MAX_CHARS_COMMENT * 0.9 && len < MAX_CHARS_COMMENT
-    )
-    counter.classList.toggle("z-char-counter-over", len > MAX_CHARS_COMMENT)
-    submitBtn.disabled = isSubmitting || len === 0 || len > MAX_CHARS_COMMENT
-  })
-
   form.appendChild(textarea)
+
+  if (mediaOptions?.uploads && mediaOptions.uploads.length > 0) {
+    form.appendChild(
+      renderUploadStrip(mediaOptions.uploads, mediaOptions.onRemoveUpload)
+    )
+  }
 
   const footer = document.createElement("div")
   footer.className = "z-form-footer"
 
-  const counter = document.createElement("span")
-  counter.className = "z-char-counter"
-  counter.setAttribute("aria-live", "polite")
-  counter.textContent = `0 / ${MAX_CHARS_COMMENT}`
-  footer.appendChild(counter)
+  const footerLeft = document.createElement("div")
+  footerLeft.className = "z-form-actions-left"
+
+  if (mediaOptions?.enabled) {
+    const attachBtn = document.createElement("button")
+    attachBtn.type = "button"
+    attachBtn.className = "z-attach-btn"
+    attachBtn.setAttribute("aria-label", "Attach images")
+    attachBtn.title = "Attach images (max 4)"
+    attachBtn.innerHTML = PHOTO_ICON
+    attachBtn.disabled = isSubmitting || mediaOptions.uploads.length >= 4
+
+    const fileInput = document.createElement("input")
+    fileInput.type = "file"
+    fileInput.accept = "image/jpeg,image/png,image/webp,image/gif"
+    fileInput.multiple = true
+    fileInput.style.display = "none"
+    fileInput.addEventListener("change", () => {
+      mediaOptions.onFileSelect(fileInput.files)
+      fileInput.value = ""
+    })
+    attachBtn.addEventListener("click", () => fileInput.click())
+
+    footerLeft.appendChild(attachBtn)
+    footerLeft.appendChild(fileInput)
+  }
+
+  footer.appendChild(footerLeft)
+
+  const isUploading =
+    mediaOptions?.uploads.some((u) => u.status === "uploading") ?? false
+  const successfulUploads =
+    mediaOptions?.uploads.filter((u) => u.status === "done" && u.url) ?? []
+
+  const updateSubmitState = () => {
+    const len = textarea.value.length
+    const hasText = textarea.value.trim().length > 0
+    const hasImages = successfulUploads.length > 0
+    const uploading =
+      mediaOptions?.uploads.some((u) => u.status === "uploading") ?? false
+    submitBtn.disabled =
+      isSubmitting ||
+      uploading ||
+      (!hasText && !hasImages) ||
+      len > MAX_CHARS_COMMENT
+  }
 
   const submitBtn = document.createElement("button")
   submitBtn.className = "z-btn z-btn-primary"
   submitBtn.type = "button"
   submitBtn.textContent = isSubmitting
     ? "Posting…"
-    : replyTo
-      ? "Post reply"
-      : "Post comment"
-  submitBtn.disabled = isSubmitting || textarea.value.trim().length === 0
+    : isUploading
+      ? "Uploading…"
+      : replyTo
+        ? "Post reply"
+        : "Post comment"
+  updateSubmitState()
+
+  textarea.addEventListener("input", () => {
+    textarea.style.height = "auto"
+    textarea.style.height = `${textarea.scrollHeight}px`
+    updateSubmitState()
+  })
+
   submitBtn.addEventListener("click", async () => {
     const body = textarea.value.trim()
-    if (!body || body.length > MAX_CHARS_COMMENT) {
+    const urls = successfulUploads.map((u) => u.url!)
+    if ((!body && urls.length === 0) || body.length > MAX_CHARS_COMMENT) {
       textarea.focus()
       return
     }
-    await onSubmit(body, replyTo?.id)
+    await onSubmit(body, replyTo?.id, urls)
     textarea.value = ""
     textarea.style.height = ""
-    counter.textContent = `0 / ${MAX_CHARS_COMMENT}`
-    counter.classList.remove("z-char-counter-warn", "z-char-counter-over")
     submitBtn.disabled = true
   })
 

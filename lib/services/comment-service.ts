@@ -3,6 +3,7 @@ import { ApiError } from "@/lib/api/error"
 import { sanitizeBody } from "@/lib/sanitize"
 import { CommentStatus } from "@/generated/prisma/client"
 import type { CreateCommentInput } from "@/lib/validators/comment"
+import { assertImageUrlsAllowed } from "@/lib/services/media-service"
 import {
   notifyNewComment,
   notifyReply,
@@ -34,6 +35,7 @@ function buildCommentSelect(userEmail?: string, commenterId?: string) {
   return {
     id: true,
     body: true,
+    imageUrls: true,
     status: true,
     createdAt: true,
     editedAt: true,
@@ -47,6 +49,7 @@ function buildCommentSelect(userEmail?: string, commenterId?: string) {
       select: {
         id: true,
         body: true,
+        imageUrls: true,
         status: true,
         createdAt: true,
         editedAt: true,
@@ -191,6 +194,7 @@ export async function getApprovedCommentsForPage(
   return raw.map((c) => ({
     id: c.id,
     body: c.body,
+    imageUrls: c.imageUrls,
     status: c.status,
     createdAt: c.createdAt.toISOString(),
     editedAt: c.editedAt?.toISOString() ?? null,
@@ -205,6 +209,7 @@ export async function getApprovedCommentsForPage(
     replies: c.replies.map((r) => ({
       id: r.id,
       body: r.body,
+      imageUrls: r.imageUrls,
       status: r.status,
       createdAt: r.createdAt.toISOString(),
       editedAt: r.editedAt?.toISOString() ?? null,
@@ -226,8 +231,15 @@ export async function createComment(
   commenterId: string,
   autoApprove: boolean
 ) {
-  const sanitized = sanitizeBody(data.body)
-  if (!sanitized) throw new ApiError("Comment body is empty", 400)
+  const sanitized = sanitizeBody(data.body ?? "")
+  const imageUrls = data.imageUrls ?? []
+  if (!sanitized && imageUrls.length === 0) {
+    throw new ApiError("Comment must contain text or images", 400)
+  }
+
+  if (imageUrls.length > 0) {
+    assertImageUrlsAllowed(imageUrls)
+  }
 
   const site = await db.site.findUniqueOrThrow({
     where: { siteKey: data.siteKey },
@@ -258,6 +270,7 @@ export async function createComment(
   const raw = await db.comment.create({
     data: {
       body: sanitized,
+      imageUrls,
       pageId: page.id,
       parentId: data.parentId ?? null,
       commenterId,
@@ -397,6 +410,7 @@ export async function createComment(
   return {
     id: raw.id,
     body: raw.body,
+    imageUrls: raw.imageUrls,
     status: raw.status,
     createdAt: raw.createdAt.toISOString(),
     editedAt: raw.editedAt?.toISOString() ?? null,
@@ -421,6 +435,33 @@ export async function updateCommentBody(commentId: string, body: string) {
   return {
     id: raw.id,
     body: raw.body,
+    imageUrls: raw.imageUrls,
+    status: raw.status,
+    createdAt: raw.createdAt.toISOString(),
+    editedAt: raw.editedAt?.toISOString() ?? null,
+    likeCount: raw._count.likes,
+    hasLiked: false,
+    parentId: raw.parentId,
+    commenter: raw.commenter,
+    replies: [],
+  }
+}
+
+export async function updateCommentImages(
+  commentId: string,
+  imageUrls: string[]
+) {
+  assertImageUrlsAllowed(imageUrls)
+  const raw = await db.comment.update({
+    where: { id: commentId },
+    data: { imageUrls, editedAt: new Date() },
+    select: buildCommentSelect(),
+  })
+
+  return {
+    id: raw.id,
+    body: raw.body,
+    imageUrls: raw.imageUrls,
     status: raw.status,
     createdAt: raw.createdAt.toISOString(),
     editedAt: raw.editedAt?.toISOString() ?? null,
@@ -442,6 +483,7 @@ export async function deleteComment(commentId: string) {
   return {
     id: raw.id,
     body: raw.body,
+    imageUrls: raw.imageUrls,
     status: raw.status,
     createdAt: raw.createdAt.toISOString(),
     editedAt: raw.editedAt?.toISOString() ?? null,

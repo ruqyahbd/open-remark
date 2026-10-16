@@ -7,6 +7,11 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export type UploadedImage = {
+  url: string
+  thumbUrl: string
+}
+
 export async function fetchComments(
   appUrl: string,
   siteKey: string,
@@ -34,6 +39,7 @@ export async function postComment(
     url?: string
     parentId?: string
     replyToId?: string
+    imageUrls?: string[]
   }
 ): Promise<CommentData> {
   const res = await fetch(`${appUrl}/api/widget/comments`, {
@@ -48,6 +54,28 @@ export async function postComment(
     if (res.status === 401) throw new UnauthorizedError()
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error ?? "Failed to post comment")
+  }
+  return res.json()
+}
+
+export async function uploadImage(
+  appUrl: string,
+  token: string,
+  siteKey: string,
+  file: File
+): Promise<UploadedImage> {
+  const form = new FormData()
+  form.append("siteKey", siteKey)
+  form.append("file", file)
+  const res = await fetch(`${appUrl}/api/widget/uploads`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new UnauthorizedError()
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? "Failed to upload image")
   }
   return res.json()
 }
@@ -76,7 +104,8 @@ export async function updateComment(
   appUrl: string,
   token: string,
   commentId: string,
-  body: string
+  body: string,
+  imageUrls?: string[]
 ): Promise<CommentData> {
   const res = await fetch(`${appUrl}/api/widget/comments/${commentId}`, {
     method: "PATCH",
@@ -84,7 +113,10 @@ export async function updateComment(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({
+      body,
+      ...(imageUrls !== undefined && { imageUrls }),
+    }),
   })
   if (!res.ok) {
     if (res.status === 401) throw new UnauthorizedError()
