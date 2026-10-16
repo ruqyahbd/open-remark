@@ -3,19 +3,10 @@ import type { LucideIcon } from "lucide-react"
 import Link from "next/link"
 import config from "@/config/config.json"
 import pkg from "@/package.json"
-import { cn } from "@/lib/utils"
 import { getListPage } from "@/lib/content"
 import { markdownify } from "@/lib/text-converter"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-} from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
 import {
   MessageSquare,
   Globe,
@@ -24,7 +15,6 @@ import {
   Code2,
   Gift,
   ArrowRight,
-  Check,
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Logo } from "@/components/logo"
@@ -237,120 +227,6 @@ export default function HomePage() {
               )
             })}
           </div>
-        </section>
-
-        {/* Pricing */}
-        <section className="mx-auto max-w-5xl px-4 py-28" id="pricing">
-          <h2 className="mb-4 text-center text-step-3 font-bold text-balance">
-            {pricing.heading}
-          </h2>
-          <p className="mb-14 text-center text-step-1 text-balance text-muted-foreground">
-            {pricing.subheading}
-          </p>
-          <div className="mx-auto grid max-w-3xl gap-6 sm:grid-cols-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- markdown content is untyped by design */}
-            {plans.map((plan: any) => {
-              const Icon = iconMap[plan.icon]
-              return (
-                <Card
-                  key={plan.name}
-                  className={cn(
-                    "relative gap-4 rounded-2xl shadow-none ring-0",
-                    plan.highlighted &&
-                      "border-primary/20 bg-gradient-to-br from-secondary to-card"
-                  )}
-                >
-                  {plan.urgencyBadge && (
-                    <div className="absolute top-6 right-6 flex flex-col items-end gap-1.5">
-                      {plan.urgencyBadge && (
-                        <Badge
-                          variant="destructive"
-                          className="rounded-sm border border-primary/5 px-2 py-2.5"
-                        >
-                          {plan.urgencyBadge}
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-                  <CardHeader className="gap-3">
-                    <div
-                      className={cn(
-                        "flex size-9 items-center justify-center rounded-md",
-                        plan.highlighted ? "bg-primary/15" : "bg-primary/10"
-                      )}
-                    >
-                      <Icon
-                        className="size-5 text-primary"
-                        aria-hidden="true"
-                      />
-                    </div>
-                    <h3 className="text-step-1 font-semibold">{plan.name}</h3>
-                    <div className="flex items-baseline gap-1">
-                      <span
-                        className={cn(
-                          "text-step-4 font-bold",
-                          plan.highlighted &&
-                            "bg-gradient-to-br from-foreground to-primary bg-clip-text text-transparent"
-                        )}
-                      >
-                        {plan.price}
-                      </span>
-                      <span className="text-step--1 text-muted-foreground">
-                        / {plan.period}
-                      </span>
-                    </div>
-                    <CardDescription>{plan.description}</CardDescription>
-                  </CardHeader>
-                  <Separator />
-                  <CardContent className="flex-1">
-                    {plan.includesNote && (
-                      <p className="mb-3 text-step--1 font-medium text-muted-foreground">
-                        {plan.includesNote}
-                      </p>
-                    )}
-                    <ul className="flex flex-col gap-3">
-                      {plan.features.map((f: string) => (
-                        <li
-                          key={f}
-                          className="flex items-start gap-2 text-step--1"
-                        >
-                          <Check
-                            className="mt-0.5 size-4 shrink-0 text-primary"
-                            aria-hidden="true"
-                          />
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                  <CardFooter>
-                    <Button
-                      asChild
-                      className="w-full"
-                      size={"lg"}
-                      variant={plan.highlighted ? "default" : "outline"}
-                    >
-                      {plan.cta.external ? (
-                        <Link
-                          href={plan.cta.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {plan.cta.label}
-                          <span className="sr-only"> (opens in new tab)</span>
-                        </Link>
-                      ) : (
-                        <Link href={plan.cta.link}>{plan.cta.label}</Link>
-                      )}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              )
-            })}
-          </div>
-          <p className="mt-8 text-center text-step--1 text-muted-foreground">
-            {pricing.footnote}
-          </p>
         </section>
 
         {/* How it works */}

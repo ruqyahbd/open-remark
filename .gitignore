@@ -54,3 +54,23 @@ prisma/dev.db-journal
 
 # Brainstorming mockups
 .superpowers
+
+# Auto-generated agent rules (personalized per developer)
+.brainsync/agent-rules.md
+
+# Auto-generated AI agent exclusions
+.cursorrules
+.clineRules
+.windsurfrules
+.gemini/
+.cline/
+.agent/
+.agents/
+.agent-mem/
+.cursor/
+.brainsync/
+.kiro/
+.vscode/
+
+AGENT.md
+CLAUDE.md

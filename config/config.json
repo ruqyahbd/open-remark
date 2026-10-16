@@ -9,13 +9,13 @@
     "logo_text": "OpenRemark"
   },
   "metadata": {
-    "meta_author": "Zeon.Studio",
+    "meta_author": "almahmud",
     "meta_image": "/images/og-image.png",
     "meta_description": "OpenRemark - An open-source comment system for static websites, built with Next.js and Prisma."
   },
 
   "google_tag_manager": {
-    "enable": true,
+    "enable": false,
     "gtm_id": "GTM-PTDPPT6L"
   },
 
