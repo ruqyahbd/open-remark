@@ -2,8 +2,7 @@ import { db } from "@/lib/db"
 import { ApiError } from "@/lib/api/error"
 import { sanitizeBody } from "@/lib/sanitize"
 import { CommentStatus } from "@/generated/prisma/client"
-import type { CreateCommentInput } from "@/lib/validators/comment"
-import { assertImageUrlsAllowed } from "./media-service"
+import { assertImageUrlsAllowed } from "@/lib/media/validation"
 import {
   notifyNewComment,
   notifyReply,

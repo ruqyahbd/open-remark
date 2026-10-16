@@ -1,5 +1,3 @@
-import sharp from "sharp"
-
 export type ImageKind = "jpeg" | "png" | "gif" | "webp"
 
 export const DEFAULT_QUALITY = 70
@@ -43,21 +41,32 @@ export async function optimizeImage(
   kind: ImageKind,
   quality: number = DEFAULT_QUALITY
 ): Promise<{ buffer: Buffer; mime: string }> {
-  // Clamp defensively — callers validate, but a bad row must not crash sharp.
-  const q = Math.min(100, Math.max(1, Math.round(quality) || DEFAULT_QUALITY))
-  // `animated: kind === "gif"` preserves every frame of animated GIF input;
-  // still WebP input is flattened to its first frame.
-  const encoded = await sharp(bytes, { animated: kind === "gif" })
-    .resize({
-      width: MAX_EDGE,
-      height: MAX_EDGE,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .webp({ quality: q, effort: 4 })
-    .toBuffer()
-  // Never-grow rule: keep the original when re-encoding costs bytes.
-  if (encoded.length >= bytes.length)
+  try {
+    const sharpModule = await import("sharp")
+    const sharp = sharpModule.default || sharpModule
+    // Clamp defensively — callers validate, but a bad row must not crash sharp.
+    const q = Math.min(100, Math.max(1, Math.round(quality) || DEFAULT_QUALITY))
+    // `animated: kind === "gif"` preserves every frame of animated GIF input;
+    // still WebP input is flattened to its first frame.
+    const encoded = await sharp(bytes, { animated: kind === "gif" })
+      .resize({
+        width: MAX_EDGE,
+        height: MAX_EDGE,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: q, effort: 4 })
+      .toBuffer()
+    // Never-grow rule: keep the original when re-encoding costs bytes.
+    if (encoded.length >= bytes.length) {
+      return { buffer: bytes, mime: ORIGINAL_MIME[kind] }
+    }
+    return { buffer: encoded, mime: "image/webp" }
+  } catch (err) {
+    console.warn(
+      "Sharp optimization skipped or unavailable, uploading original image:",
+      err
+    )
     return { buffer: bytes, mime: ORIGINAL_MIME[kind] }
-  return { buffer: encoded, mime: "image/webp" }
+  }
 }

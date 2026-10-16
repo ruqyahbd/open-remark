@@ -6,8 +6,7 @@ import {
   updateCommentImages,
   deleteComment,
 } from "@/lib/services/comment-service"
-import { isCommenterBannedOnSite } from "@/lib/services/user-service"
-import { assertImageUrlsAllowed } from "@/lib/services/media-service"
+import { assertImageUrlsAllowed } from "@/lib/media/validation"
 import { verifyWidgetToken } from "@/lib/auth-widget"
 import { corsHeaders } from "@/lib/cors"
 import { db } from "@/lib/db"
