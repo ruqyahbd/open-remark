@@ -2,9 +2,11 @@ import type {
   AuthState,
   CommentData,
   Commenter,
+  PendingUpload,
   WidgetConfig,
   WidgetThemeConfig,
 } from "./types"
+import { MAX_CHARS_COMMENT } from "./constants"
 import {
   fetchComments,
   postComment,
@@ -13,6 +15,7 @@ import {
   deleteComment,
   updateNotificationPreference,
   searchCommenters,
+  uploadImage,
   UnauthorizedError,
 } from "./api"
 import { loadStoredAuth, signInWithGoogle, clearAuth } from "./auth"
@@ -26,8 +29,10 @@ import {
   renderLoading,
   renderLoadingAuthBar,
   renderBannedBanner,
+  renderMediaStrip,
   type CommentHandlers,
   type CommentState,
+  type MediaPickerHooks,
 } from "./render"
 
 declare const __APP_URL__: string
@@ -139,6 +144,12 @@ class ZeonWidget {
   private activeConfig: WidgetThemeConfig | null = null
   private lastEffectiveTheme: "LIGHT" | "DARK" | null = null
   private htmlObserver: MutationObserver | null = null
+  private mediaForms = new Map<string, PendingUpload[]>()
+  private editImageUrls: string[] | null = null
+  private editImageSnapshot: string[] | null = null
+  private lightbox: HTMLElement | null = null
+  private lightboxImg: HTMLImageElement | null = null
+  private lightboxOpener: HTMLElement | null = null
 
   constructor(config: WidgetConfig) {
     this.config = config
@@ -158,6 +169,9 @@ class ZeonWidget {
         radius: 8,
         enable: true,
         poweredByHtml: "",
+        mediaEnabled: false,
+        mediaMaxImages: 4,
+        mediaMaxBytes: 5 * 1024 * 1024,
       }
     )
     this.shadow.appendChild(this.themeStyle)
@@ -311,6 +325,9 @@ class ZeonWidget {
     this.replyTo = null
     this.replyingToId = null
     this.isEditingId = null
+    this.editImageUrls = null
+    this.editImageSnapshot = null
+    this.mediaForms.clear()
     this.render()
   }
 
@@ -335,8 +352,14 @@ class ZeonWidget {
     }
   }
 
-  private async handleSubmit(body: string, parentId?: string) {
+  private async handleSubmit(
+    body: string,
+    parentId?: string,
+    imageUrls?: string[]
+  ) {
     if (this.auth.status !== "authenticated") return
+    const formKey =
+      parentId && parentId !== this.replyTo?.id ? `reply:${parentId}` : "main"
     this.isSubmitting = true
     this.render()
     try {
@@ -362,6 +385,7 @@ class ZeonWidget {
         url: window.location.href.split("#")[0],
         parentId: finalParentId,
         replyToId,
+        ...(imageUrls && imageUrls.length > 0 ? { imageUrls } : {}),
       })
 
       if (finalParentId) {
@@ -375,6 +399,7 @@ class ZeonWidget {
       this.buildCommentMap()
       this.replyTo = null
       this.replyingToId = null
+      this.mediaForms.delete(formKey)
       this.actionError = null
     } catch (err: unknown) {
       this.handleApiError(err, "Failed to post")
@@ -436,6 +461,9 @@ class ZeonWidget {
     this.replyTo = null
     this.replyingToId = null
     this.isEditingId = null
+    this.editImageUrls = null
+    this.editImageSnapshot = null
+    this.mediaForms.clear()
     this.auth = {
       status: "error",
       message: "Your session expired. Please sign in again.",
@@ -474,12 +502,15 @@ class ZeonWidget {
       this.handleSignIn()
       return
     }
+    const prev = this.replyingToId
+    if (prev && prev !== comment.id) this.mediaForms.delete(`reply:${prev}`)
     this.replyingToId = comment.id
     this.patchComment(comment.id)
   }
 
   private handleCancelReply() {
     const prev = this.replyingToId
+    if (prev) this.mediaForms.delete(`reply:${prev}`)
     this.replyingToId = null
     if (prev) {
       this.patchComment(prev)
@@ -491,12 +522,16 @@ class ZeonWidget {
   private handleEditClick(comment: CommentData) {
     if (this.auth.status !== "authenticated") return
     this.isEditingId = comment.id
+    this.editImageUrls = [...(comment.imageUrls ?? [])]
+    this.editImageSnapshot = [...(comment.imageUrls ?? [])]
     this.patchComment(comment.id)
   }
 
   private handleCancelEdit() {
     const prev = this.isEditingId
     this.isEditingId = null
+    this.editImageUrls = null
+    this.editImageSnapshot = null
     if (prev) {
       this.patchComment(prev)
     } else {
@@ -549,24 +584,229 @@ class ZeonWidget {
     this.isSubmitting = true
     this.render()
     try {
+      const sendImageUrls =
+        (this.editImageSnapshot?.length ?? 0) > 0 ||
+        (this.editImageUrls?.length ?? 0) > 0
+          ? (this.editImageUrls ?? undefined)
+          : undefined
       const updated = await updateComment(
         this.config.appUrl,
         this.auth.token,
         commentId,
-        body
+        body,
+        sendImageUrls
       )
       const target = this.findComment(commentId)
       if (target) {
         target.body = updated.body
         target.editedAt = updated.editedAt
+        target.imageUrls = updated.imageUrls ?? target.imageUrls
       }
       this.isEditingId = null
+      this.editImageUrls = null
+      this.editImageSnapshot = null
     } catch (err: unknown) {
       this.handleApiError(err, "Failed to update")
     } finally {
       this.isSubmitting = false
       this.render()
     }
+  }
+
+  private handlePickFiles(formKey: string, files: FileList) {
+    const pending = this.mediaForms.get(formKey)
+    if (!pending) return
+    const max = this.activeConfig?.mediaMaxImages ?? 4
+    const maxBytes = this.activeConfig?.mediaMaxBytes ?? 5 * 1024 * 1024
+    const token = this.auth.status === "authenticated" ? this.auth.token : null
+    if (!token) return
+    for (const file of Array.from(files)) {
+      if (pending.filter((p) => p.status !== "error").length >= max) break
+      if (
+        !["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
+          file.type
+        )
+      ) {
+        pending.push({
+          id: crypto.randomUUID(),
+          name: file.name,
+          status: "error",
+          error: "Unsupported image type",
+        })
+        continue
+      }
+      if (file.size > maxBytes) {
+        pending.push({
+          id: crypto.randomUUID(),
+          name: file.name,
+          status: "error",
+          error: `Too large (max ${(maxBytes / 1048576).toFixed(1)} MB)`,
+        })
+        continue
+      }
+      const item: PendingUpload = {
+        id: crypto.randomUUID(),
+        name: file.name,
+        status: "uploading",
+      }
+      pending.push(item)
+      const itemId = item.id
+      uploadImage(this.config.appUrl, token, {
+        file,
+        siteKey: this.config.siteKey,
+      }).then(
+        (r) => {
+          const list = this.mediaForms.get(formKey)
+          const target = list?.find((p) => p.id === itemId)
+          if (target && target.status === "uploading") {
+            const ready: PendingUpload = {
+              id: itemId,
+              name: file.name,
+              status: "ready",
+              url: r.url,
+              thumb: r.thumbUrl ?? r.url,
+            }
+            list!.splice(list!.indexOf(target), 1, ready)
+          }
+          this.refreshStrip(formKey)
+        },
+        (err: unknown) => {
+          if (err instanceof UnauthorizedError) {
+            const expired = this.mediaForms.get(formKey)
+            if (expired) {
+              const i = expired.findIndex((p) => p.id === itemId)
+              if (i !== -1) expired.splice(i, 1)
+            }
+            this.handleSessionExpired()
+            return
+          }
+          const list = this.mediaForms.get(formKey)
+          const target = list?.find((p) => p.id === itemId)
+          if (target && target.status === "uploading") {
+            const failed: PendingUpload = {
+              id: itemId,
+              name: file.name,
+              status: "error",
+              error: err instanceof Error ? err.message : "Upload failed",
+            }
+            list!.splice(list!.indexOf(target), 1, failed)
+          }
+          this.refreshStrip(formKey)
+        }
+      )
+    }
+    this.refreshStrip(formKey)
+  }
+
+  private handleRemovePending(formKey: string, id: string) {
+    const list = this.mediaForms.get(formKey)
+    if (!list) return
+    const i = list.findIndex((p) => p.id === id)
+    if (i !== -1) list.splice(i, 1)
+    this.refreshStrip(formKey)
+  }
+
+  private refreshStrip(formKey: string) {
+    const host = this.shadow.querySelector(`[data-strip="${formKey}"]`)
+    if (!host) return
+    const pending = this.mediaForms.get(formKey) ?? []
+    const strip = renderMediaStrip(formKey, {
+      enabled:
+        (this.activeConfig?.mediaEnabled ?? false) &&
+        this.auth.status === "authenticated",
+      maxImages: this.activeConfig?.mediaMaxImages ?? 4,
+      maxBytes: this.activeConfig?.mediaMaxBytes ?? 5 * 1024 * 1024,
+      pending,
+      onPick: (files) => this.handlePickFiles(formKey, files),
+      onRemove: (id) => this.handleRemovePending(formKey, id),
+    })
+    host.replaceWith(strip)
+    const scope = strip.closest(".z-form, .z-inline-form")
+    if (!scope) return
+    const uploading = pending.some((p) => p.status === "uploading")
+    const hint = scope.querySelector<HTMLElement>(".z-upload-hint")
+    if (hint) hint.style.display = uploading ? "" : "none"
+    const submit = scope.querySelector<HTMLButtonElement>(
+      ".z-form-footer .z-btn-primary, .z-inline-form-btns .z-btn-primary"
+    )
+    const textarea = scope.querySelector<HTMLTextAreaElement>("textarea")
+    if (!submit || !textarea || textarea.disabled) {
+      if (uploading && submit && !submit.disabled) submit.disabled = true
+      return
+    }
+    if (uploading) {
+      submit.disabled = true
+      return
+    }
+    const len = textarea.value.trim().length
+    const ready = pending.some((p) => p.status === "ready")
+    submit.disabled = (len === 0 && !ready) || len > MAX_CHARS_COMMENT
+  }
+
+  private buildMediaHooks(formKey: string): MediaPickerHooks | null {
+    if (!(this.activeConfig?.mediaEnabled ?? false)) return null
+    if (this.auth.status !== "authenticated") return null
+    if (!this.mediaForms.has(formKey)) this.mediaForms.set(formKey, [])
+    const pending = this.mediaForms.get(formKey) ?? []
+    return {
+      enabled: true,
+      maxImages: this.activeConfig?.mediaMaxImages ?? 4,
+      maxBytes: this.activeConfig?.mediaMaxBytes ?? 5 * 1024 * 1024,
+      pending,
+      onPick: (files) => this.handlePickFiles(formKey, files),
+      onRemove: (id) => this.handleRemovePending(formKey, id),
+    }
+  }
+
+  private lightboxEscHandler = (e: Event) => {
+    if ((e as KeyboardEvent).key === "Escape") this.closeLightbox()
+  }
+
+  private openLightbox(url: string, opener?: HTMLElement | null) {
+    if (opener) this.lightboxOpener = opener
+    if (!this.lightbox) {
+      const overlay = document.createElement("div")
+      overlay.className = "z-lightbox"
+      overlay.setAttribute("role", "dialog")
+      overlay.setAttribute("aria-modal", "true")
+      overlay.setAttribute("aria-label", "Image viewer")
+
+      const img = document.createElement("img")
+      img.alt = "Full size image"
+      overlay.appendChild(img)
+      this.lightboxImg = img
+
+      const close = document.createElement("button")
+      close.className = "z-lightbox-close"
+      close.type = "button"
+      close.setAttribute("aria-label", "Close image viewer")
+      close.textContent = "✕"
+      close.addEventListener("click", () => this.closeLightbox())
+      overlay.appendChild(close)
+
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) this.closeLightbox()
+      })
+      this.lightbox = overlay
+      this.shadow.appendChild(overlay)
+    }
+    if (this.lightboxImg) this.lightboxImg.src = url
+    this.lightbox.style.display = "flex"
+    this.shadow.addEventListener("keydown", this.lightboxEscHandler)
+    const closeBtn =
+      this.lightbox.querySelector<HTMLButtonElement>(".z-lightbox-close")
+    closeBtn?.focus()
+  }
+
+  private closeLightbox() {
+    if (!this.lightbox) return
+    this.lightbox.style.display = "none"
+    this.shadow.removeEventListener("keydown", this.lightboxEscHandler)
+    if (this.lightboxImg) this.lightboxImg.removeAttribute("src")
+    if (this.lightboxOpener && this.shadow.contains(this.lightboxOpener)) {
+      this.lightboxOpener.focus()
+    }
+    this.lightboxOpener = null
   }
 
   private renderLoadingState() {
@@ -617,8 +857,10 @@ class ZeonWidget {
       onDelete: (comment) => this.handleDeleteClick(comment),
       onCancelDelete: () => this.handleCancelDelete(),
       onConfirmDelete: (id) => this.handleConfirmDelete(id),
-      onSubmitReply: (body, parentId) => this.handleSubmit(body, parentId),
+      onSubmitReply: (body, parentId, imageUrls) =>
+        this.handleSubmit(body, parentId, imageUrls),
       onCancelReply: () => this.handleCancelReply(),
+      onOpenImage: (url, opener) => this.openLightbox(url, opener),
     }
   }
 
@@ -630,6 +872,19 @@ class ZeonWidget {
       isSubmitting: this.isSubmitting,
       currentUser: this.currentUser,
       likingIds: this.likingIds,
+      replyMediaHooks: (commentId) =>
+        this.buildMediaHooks(`reply:${commentId}`),
+      editImagesFor: (comment) => {
+        if (this.isEditingId !== comment.id) return null
+        if (!this.editImageUrls || this.editImageUrls.length === 0) return null
+        return {
+          urls: [...this.editImageUrls],
+          onRemove: (url) => {
+            if (!this.editImageUrls) return
+            this.editImageUrls = this.editImageUrls.filter((u) => u !== url)
+          },
+        }
+      },
     }
   }
 
@@ -676,15 +931,18 @@ class ZeonWidget {
     )
 
     if (this.auth.status === "authenticated" && !this.isBanned) {
+      if (!this.mediaForms.has("main")) this.mediaForms.set("main", [])
       this.root.appendChild(
         renderCommentForm(
-          (body, parentId) => this.handleSubmit(body, parentId),
+          (body, parentId, imageUrls) =>
+            this.handleSubmit(body, parentId, imageUrls),
           this.replyTo,
           () => {
             this.replyTo = null
             this.render()
           },
-          this.isSubmitting
+          this.isSubmitting,
+          this.buildMediaHooks("main")
         )
       )
     }
@@ -740,9 +998,14 @@ class ZeonWidget {
 
   destroy() {
     this.htmlObserver?.disconnect()
+    this.shadow.removeEventListener("keydown", this.lightboxEscHandler)
     this.root.innerHTML = ""
     this.mentionDropdown?.remove()
     this.profileTooltip?.remove()
+    this.lightbox?.remove()
+    this.lightbox = null
+    this.lightboxImg = null
+    this.lightboxOpener = null
   }
 
   // ─── Mention autocomplete ─────────────────────────────────────────────────

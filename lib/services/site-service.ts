@@ -25,6 +25,13 @@ const EMAIL_SETTING_FIELDS = [
   "smtpFrom",
 ] as const satisfies readonly (keyof UpdateSiteInput)[]
 
+export function stripSiteSecrets<T extends { mediaApiKey?: string | null }>(
+  site: T
+): Omit<T, "mediaApiKey"> & { hasMediaApiKey: boolean } {
+  const { mediaApiKey, ...rest } = site
+  return { ...rest, hasMediaApiKey: mediaApiKey != null && mediaApiKey !== "" }
+}
+
 export async function getSiteCountForUser(userId: string) {
   return db.site.count({ where: { members: { some: { userId } } } })
 }
@@ -85,7 +92,7 @@ export async function getSitesForUser(userId: string) {
     const dayMap = activityBySite.get(site.id) ?? new Map()
     const { members, ...rest } = site
     return {
-      ...rest,
+      ...stripSiteSecrets(rest),
       role: members[0].role,
       totalComments: site.pages.reduce((acc, p) => acc + p._count.comments, 0),
       pendingComments: site.pages.reduce(
@@ -100,6 +107,17 @@ export async function getSitesForUser(userId: string) {
 export async function getSiteByIdForUser(siteId: string, userId: string) {
   const { site } = await getSiteForMember(siteId, userId)
   return site
+}
+
+/** Returns the raw media provider key — only for explicit reveal flows. Never include in list/detail serializers. */
+export async function getSiteMediaKey(siteId: string, userId: string) {
+  await requireSiteAccess(siteId, userId, "MANAGE_SETTINGS")
+  const site = await db.site.findUnique({
+    where: { id: siteId },
+    select: { mediaApiKey: true },
+  })
+  if (!site) throw new ApiError("Site not found", 404)
+  return site.mediaApiKey
 }
 
 export async function getSiteBySiteKey(siteKey: string) {
@@ -148,45 +166,63 @@ export async function updateSite(
   ) {
     throw new ApiError("Forbidden", 403)
   }
-  return db.site.update({
-    where: { id: siteId },
-    data: {
-      ...(input.name && { name: input.name }),
-      ...(input.domain && { domain: input.domain }),
-      ...(typeof input.autoApprove === "boolean" && {
-        autoApprove: input.autoApprove,
-      }),
-      ...(input.allowedOrigins && {
-        allowedOrigins: JSON.stringify(input.allowedOrigins),
-      }),
-      ...(input.theme && { theme: input.theme }),
-      ...(input.primaryColor && { primaryColor: input.primaryColor }),
-      ...(typeof input.radius === "number" && { radius: input.radius }),
-      ...(typeof input.emailNotificationsEnabled === "boolean" && {
-        emailNotificationsEnabled: input.emailNotificationsEnabled,
-      }),
-      ...(typeof input.likeNotificationLimit === "number" && {
-        likeNotificationLimit: input.likeNotificationLimit,
-      }),
-      ...(input.emailSubjectPrefix !== undefined && {
-        emailSubjectPrefix: input.emailSubjectPrefix,
-      }),
-      ...(input.emailLogoUrl !== undefined && {
-        emailLogoUrl: input.emailLogoUrl,
-      }),
-      ...(input.emailAccentColor !== undefined && {
-        emailAccentColor: input.emailAccentColor,
-      }),
-      ...(input.emailFooterText !== undefined && {
-        emailFooterText: input.emailFooterText,
-      }),
-      ...(input.smtpHost !== undefined && { smtpHost: input.smtpHost }),
-      ...(input.smtpPort !== undefined && { smtpPort: input.smtpPort }),
-      ...(input.smtpUser !== undefined && { smtpUser: input.smtpUser }),
-      ...(input.smtpPass !== undefined && { smtpPass: input.smtpPass }),
-      ...(input.smtpFrom !== undefined && { smtpFrom: input.smtpFrom }),
-    },
-  })
+  return stripSiteSecrets(
+    await db.site.update({
+      where: { id: siteId },
+      data: {
+        ...(input.name && { name: input.name }),
+        ...(input.domain && { domain: input.domain }),
+        ...(typeof input.autoApprove === "boolean" && {
+          autoApprove: input.autoApprove,
+        }),
+        ...(input.allowedOrigins && {
+          allowedOrigins: JSON.stringify(input.allowedOrigins),
+        }),
+        ...(input.theme && { theme: input.theme }),
+        ...(input.primaryColor && { primaryColor: input.primaryColor }),
+        ...(typeof input.radius === "number" && { radius: input.radius }),
+        ...(typeof input.emailNotificationsEnabled === "boolean" && {
+          emailNotificationsEnabled: input.emailNotificationsEnabled,
+        }),
+        ...(typeof input.likeNotificationLimit === "number" && {
+          likeNotificationLimit: input.likeNotificationLimit,
+        }),
+        ...(input.emailSubjectPrefix !== undefined && {
+          emailSubjectPrefix: input.emailSubjectPrefix,
+        }),
+        ...(input.emailLogoUrl !== undefined && {
+          emailLogoUrl: input.emailLogoUrl,
+        }),
+        ...(input.emailAccentColor !== undefined && {
+          emailAccentColor: input.emailAccentColor,
+        }),
+        ...(input.emailFooterText !== undefined && {
+          emailFooterText: input.emailFooterText,
+        }),
+        ...(input.smtpHost !== undefined && { smtpHost: input.smtpHost }),
+        ...(input.smtpPort !== undefined && { smtpPort: input.smtpPort }),
+        ...(input.smtpUser !== undefined && { smtpUser: input.smtpUser }),
+        ...(input.smtpPass !== undefined && { smtpPass: input.smtpPass }),
+        ...(input.smtpFrom !== undefined && { smtpFrom: input.smtpFrom }),
+        ...(typeof input.mediaEnabled === "boolean" && {
+          mediaEnabled: input.mediaEnabled,
+        }),
+        ...(input.mediaProvider && { mediaProvider: input.mediaProvider }),
+        ...(input.mediaApiKey !== undefined && {
+          mediaApiKey: input.mediaApiKey,
+        }),
+        ...(typeof input.mediaMaxImages === "number" && {
+          mediaMaxImages: input.mediaMaxImages,
+        }),
+        ...(typeof input.mediaMaxBytes === "number" && {
+          mediaMaxBytes: input.mediaMaxBytes,
+        }),
+        ...(typeof input.mediaQuality === "number" && {
+          mediaQuality: input.mediaQuality,
+        }),
+      },
+    })
+  )
 }
 
 export async function deleteSite(siteId: string, userId: string) {
@@ -216,9 +252,11 @@ export async function transferSite(
       create: { siteId, userId: newOwner.id, role: "SITE_OWNER" },
       update: { role: "SITE_OWNER" },
     })
-    return tx.site.update({
-      where: { id: siteId },
-      data: { ownerId: newOwner.id },
-    })
+    return stripSiteSecrets(
+      await tx.site.update({
+        where: { id: siteId },
+        data: { ownerId: newOwner.id },
+      })
+    )
   })
 }

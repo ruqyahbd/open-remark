@@ -16,6 +16,7 @@ export type Commenter = {
 export type CommentData = {
   id: string
   body: string
+  imageUrls: string[]
   status: "PENDING" | "APPROVED" | "DELETED" | "SPAM"
   createdAt: string
   editedAt: string | null
@@ -47,4 +48,18 @@ export type WidgetThemeConfig = {
   currentUser?: { isBanned: boolean; notificationsEnabled: boolean }
   enable: boolean
   poweredByHtml: string
+  mediaEnabled: boolean
+  mediaMaxImages: number
+  mediaMaxBytes: number
 }
+
+export type UploadedImage = {
+  url: string
+  thumbUrl?: string
+  deleteUrl?: string
+}
+
+export type PendingUpload =
+  | { id: string; name: string; status: "uploading" }
+  | { id: string; name: string; status: "ready"; url: string; thumb: string }
+  | { id: string; name: string; status: "error"; error: string }

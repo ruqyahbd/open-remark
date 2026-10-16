@@ -1,4 +1,4 @@
-import type { CommentData, WidgetThemeConfig } from "./types"
+import type { CommentData, UploadedImage, WidgetThemeConfig } from "./types"
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -34,6 +34,7 @@ export async function postComment(
     url?: string
     parentId?: string
     replyToId?: string
+    imageUrls?: string[]
   }
 ): Promise<CommentData> {
   const res = await fetch(`${appUrl}/api/widget/comments`, {
@@ -76,7 +77,8 @@ export async function updateComment(
   appUrl: string,
   token: string,
   commentId: string,
-  body: string
+  body?: string,
+  imageUrls?: string[]
 ): Promise<CommentData> {
   const res = await fetch(`${appUrl}/api/widget/comments/${commentId}`, {
     method: "PATCH",
@@ -84,7 +86,10 @@ export async function updateComment(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({
+      ...(body !== undefined && { body }),
+      ...(imageUrls !== undefined && { imageUrls }),
+    }),
   })
   if (!res.ok) {
     if (res.status === 401) throw new UnauthorizedError()
@@ -147,6 +152,27 @@ export async function updateNotificationPreference(
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error ?? "Failed to update preference")
   }
+}
+
+export async function uploadImage(
+  appUrl: string,
+  token: string,
+  payload: { file: File; siteKey: string }
+): Promise<UploadedImage> {
+  const form = new FormData()
+  form.append("siteKey", payload.siteKey)
+  form.append("file", payload.file)
+  const res = await fetch(`${appUrl}/api/widget/uploads`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new UnauthorizedError()
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? "Failed to upload image")
+  }
+  return res.json()
 }
 
 export async function exchangeGoogleToken(
